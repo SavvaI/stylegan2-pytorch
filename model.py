@@ -173,6 +173,8 @@ class ModulatedConv2d(nn.Module):
         out_channel,
         kernel_size,
         style_dim,
+        modulation_type="style",
+        factorization_rank=5,
         demodulate=True,
         upsample=False,
         downsample=False,
@@ -180,12 +182,14 @@ class ModulatedConv2d(nn.Module):
     ):
         super().__init__()
 
+        assert modulation_type in ["style", "factorized"]
         self.eps = 1e-8
         self.kernel_size = kernel_size
         self.in_channel = in_channel
         self.out_channel = out_channel
         self.upsample = upsample
         self.downsample = downsample
+        self.factorization_rank = factorization_rank
 
         if upsample:
             factor = 2
@@ -211,7 +215,10 @@ class ModulatedConv2d(nn.Module):
             torch.randn(1, out_channel, in_channel, kernel_size, kernel_size)
         )
 
-        self.modulation = EqualLinear(style_dim, in_channel, bias_init=1)
+        if modulation_type == "style":
+            self.modulation = EqualLinear(style_dim, in_channel, bias_init=1)
+        if modulation_type == "factorized":
+            self.modulation = EqualLinear(style_dim, (in_channel + out_channel) * self.factorization_rank, bias_init=1)    
 
         self.demodulate = demodulate
 
@@ -224,8 +231,16 @@ class ModulatedConv2d(nn.Module):
     def forward(self, input, style):
         batch, in_channel, height, width = input.shape
 
-        style = self.modulation(style).view(batch, 1, in_channel, 1, 1)
-        weight = self.scale * self.weight * style
+        if modulation_type == "style":
+            style = self.modulation(style).view(batch, 1, in_channel, 1, 1)
+            weight = self.scale * self.weight * style
+        if modualtion_type == "factorized":
+            ab = self.modulation(style)
+            a, b = ab[:, :self.out_channel * self.factorization_rank], ab[:, self.out_channel * self.factorization_rank:]
+            a, b = a.view(batch, self.out_channel, self.factorization_rank), b.view(batch, self.factorization_rank, in_channel)
+            m = torch.bmm(a, b).view(batch, self.out_channel, in_channel, 1, 1)
+            weight = self.scale * self.weight * m
+            
 
         if self.demodulate:
             demod = torch.rsqrt(weight.pow(2).sum([2, 3, 4]) + 1e-8)
