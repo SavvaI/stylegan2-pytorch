@@ -691,8 +691,9 @@ class INRGenerator(nn.Module):
         style_dim,
         n_mlp,
         lr_mlp=0.01,
-        num_channels=64, 
-        num_fourier_features=2, 
+        num_channels=64,
+        channel_multiplier=None,
+        num_fourier_features=64, 
         num_layers=8
     ):
         super().__init__()
