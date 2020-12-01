@@ -2,6 +2,7 @@ import math
 import random
 import functools
 import operator
+import coordinates
 
 import torch
 from torch import nn
@@ -175,6 +176,7 @@ class ModulatedConv2d(nn.Module):
         style_dim,
         modulation_type="style",
         factorization_rank=5,
+        use_sigmoid=False,
         demodulate=True,
         upsample=False,
         downsample=False,
@@ -190,6 +192,8 @@ class ModulatedConv2d(nn.Module):
         self.upsample = upsample
         self.downsample = downsample
         self.factorization_rank = factorization_rank
+        self.use_sigmoid = use_sigmoid
+        self.modulation_type = modulation_type
 
         if upsample:
             factor = 2
@@ -218,7 +222,10 @@ class ModulatedConv2d(nn.Module):
         if modulation_type == "style":
             self.modulation = EqualLinear(style_dim, in_channel, bias_init=1)
         if modulation_type == "factorized":
-            self.modulation = EqualLinear(style_dim, (in_channel + out_channel) * self.factorization_rank, bias_init=1)    
+            if use_sigmoid:
+                self.modulation = EqualLinear(style_dim, (in_channel + out_channel) * self.factorization_rank, bias_init=0)    
+            else:
+                self.modulation = EqualLinear(style_dim, (in_channel + out_channel) * self.factorization_rank, bias_init=1)    
 
         self.demodulate = demodulate
 
@@ -231,14 +238,16 @@ class ModulatedConv2d(nn.Module):
     def forward(self, input, style):
         batch, in_channel, height, width = input.shape
 
-        if modulation_type == "style":
+        if self.modulation_type == "style":
             style = self.modulation(style).view(batch, 1, in_channel, 1, 1)
             weight = self.scale * self.weight * style
-        if modualtion_type == "factorized":
+        if self.modulation_type == "factorized":
             ab = self.modulation(style)
             a, b = ab[:, :self.out_channel * self.factorization_rank], ab[:, self.out_channel * self.factorization_rank:]
             a, b = a.view(batch, self.out_channel, self.factorization_rank), b.view(batch, self.factorization_rank, in_channel)
             m = torch.bmm(a, b).view(batch, self.out_channel, in_channel, 1, 1)
+            if self.use_sigmoid:
+                m = F.sigmoid(m)
             weight = self.scale * self.weight * m
             
 
@@ -674,3 +683,169 @@ class Discriminator(nn.Module):
 
         return out
 
+    
+class INRGenerator(nn.Module):
+    def __init__(
+        self,
+        size,
+        style_dim,
+        n_mlp,
+        lr_mlp=0.01,
+        num_channels=64, 
+        num_fourier_features=2, 
+        num_layers=8
+    ):
+        super().__init__()
+
+        self.size = size
+        self.num_channels = num_channels
+        self.num_fourier_features = num_fourier_features
+        self.num_layers = num_layers
+        self.style_dim = style_dim
+
+        layers = [PixelNorm()]
+
+        for i in range(n_mlp):
+            layers.append(
+                EqualLinear(
+                    style_dim, style_dim, lr_mul=lr_mlp, activation="fused_lrelu"
+                )
+            )
+
+        self.style = nn.Sequential(*layers)
+
+
+        self.input = coordinates.CoordinateInput(size=self.size, num_features=num_fourier_features, learnable=False)
+        
+        self.conv1 = StyledConv(
+            self.num_fourier_features, self.num_channels, 1, style_dim, blur_kernel=None, upsample=False
+        )
+        self.to_rgb1 = ToRGB(self.num_channels, style_dim, upsample=False)
+
+
+        self.convs = nn.ModuleList()
+        self.to_rgbs = nn.ModuleList()
+        self.noises = nn.Module()
+
+        in_channel = self.channels[4]
+
+        for layer_idx in range(self.num_layers + 1):
+            shape = [1, 1, self.size, self.size]
+            self.noises.register_buffer(f"noise_{layer_idx}", torch.randn(*shape))
+
+        for i in range(self.num_layers // 2):
+            self.convs.append(
+                StyledConv(
+                    self.num_channels,
+                    self.num_channels,
+                    1,
+                    style_dim,
+                    upsample=False,
+                    blur_kernel=None,
+                )
+            )
+
+            self.convs.append(
+                StyledConv(
+                    self.num_channels, self.num_channels, 1, style_dim, blur_kernel=None
+                )
+            )
+
+            self.to_rgbs.append(ToRGB(self.num_channels, style_dim))
+
+
+        self.n_latent = self.num_layers + 2
+
+    def make_noise(self):
+        device = self.input.input.device
+
+        noises = [torch.randn(1, 1, self.size, self.size, device=device)]
+
+        for i in range(self.num_layers):
+            noises.append(torch.randn(1, 1, self.size, self.size, device=device))
+
+        return noises
+
+    def mean_latent(self, n_latent):
+        latent_in = torch.randn(
+            n_latent, self.style_dim, device=self.input.input.device
+        )
+        latent = self.style(latent_in).mean(0, keepdim=True)
+
+        return latent
+
+    def get_latent(self, input):
+        return self.style(input)
+
+    def forward(
+        self,
+        styles,
+        return_latents=False,
+        inject_index=None,
+        truncation=1,
+        truncation_latent=None,
+        input_is_latent=False,
+        noise=None,
+        randomize_noise=True,
+    ):
+        if not input_is_latent:
+            styles = [self.style(s) for s in styles]
+
+        if noise is None:
+            if randomize_noise:
+                noise = [None] * (self.num_layers + 1)
+            else:
+                noise = [
+                    getattr(self.noises, f"noise_{i}") for i in range(self.num_layers + 1)
+                ]
+
+        if truncation < 1:
+            style_t = []
+
+            for style in styles:
+                style_t.append(
+                    truncation_latent + truncation * (style - truncation_latent)
+                )
+
+            styles = style_t
+
+        if len(styles) < 2:
+            inject_index = self.n_latent
+
+            if styles[0].ndim < 3:
+                latent = styles[0].unsqueeze(1).repeat(1, inject_index, 1)
+
+            else:
+                latent = styles[0]
+
+        else:
+            if inject_index is None:
+                inject_index = random.randint(1, self.n_latent - 1)
+
+            latent = styles[0].unsqueeze(1).repeat(1, inject_index, 1)
+            latent2 = styles[1].unsqueeze(1).repeat(1, self.n_latent - inject_index, 1)
+
+            latent = torch.cat([latent, latent2], 1)
+
+        out = self.input(latent)
+        out = self.conv1(out, latent[:, 0], noise=noise[0])
+
+        skip = self.to_rgb1(out, latent[:, 1])
+
+        i = 1
+        for conv1, conv2, noise1, noise2, to_rgb in zip(
+            self.convs[::2], self.convs[1::2], noise[1::2], noise[2::2], self.to_rgbs
+        ):
+            out = conv1(out, latent[:, i], noise=noise1)
+            out = conv2(out, latent[:, i + 1], noise=noise2)
+            skip = to_rgb(out, latent[:, i + 2], skip)
+
+            i += 2
+
+        image = skip
+
+        if return_latents:
+            return image, latent
+
+        else:
+            return image, None

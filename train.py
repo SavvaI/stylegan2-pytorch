@@ -18,7 +18,7 @@ try:
 except ImportError:
     wandb = None
 
-from model import Generator, Discriminator
+from model import Generator, Discriminator, INRGenerator
 from dataset import MultiResolutionDataset
 from distributed import (
     get_rank,
@@ -351,11 +351,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--n_sample",
         type=int,
-        default=64,
+        default=32,
         help="number of the samples generated during training",
     )
     parser.add_argument(
         "--size", type=int, default=256, help="image sizes for the model"
+    )
+    parser.add_argument(
+        "--generator_type", type=str, default="conv", help="type of generator to use, either conv or coord is supported"
     )
     parser.add_argument(
         "--r1", type=float, default=10, help="weight of the r1 regularization"
@@ -449,13 +452,20 @@ if __name__ == "__main__":
 
     args.start_iter = 0
 
-    generator = Generator(
+    if args.generator_type == "conv":
+        generator_model = Generator
+    elif args.generator_type == "coord":
+        generator_model = INRGenerator
+    else:
+        raise Exception("Only conv and coord generators are currently supported")
+        
+    generator = generator_model(
         args.size, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier
     ).to(device)
     discriminator = Discriminator(
         args.size, channel_multiplier=args.channel_multiplier
     ).to(device)
-    g_ema = Generator(
+    g_ema = generator_model(
         args.size, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier
     ).to(device)
     g_ema.eval()
