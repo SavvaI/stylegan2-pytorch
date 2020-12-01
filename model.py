@@ -359,6 +359,8 @@ class ToRGB(nn.Module):
 
         if upsample:
             self.upsample = Upsample(blur_kernel)
+        else:
+            self.upsample = None
 
         self.conv = ModulatedConv2d(in_channel, 3, 1, style_dim, demodulate=False)
         self.bias = nn.Parameter(torch.zeros(1, 3, 1, 1))
@@ -368,7 +370,8 @@ class ToRGB(nn.Module):
         out = out + self.bias
 
         if skip is not None:
-            skip = self.upsample(skip)
+            if not self.upsample is None:
+                skip = self.upsample(skip)
 
             out = out + skip
 
@@ -694,7 +697,7 @@ class INRGenerator(nn.Module):
         num_channels=64,
         channel_multiplier=None,
         num_fourier_features=64, 
-        num_layers=8
+        num_layers=12
     ):
         super().__init__()
 
@@ -728,8 +731,6 @@ class INRGenerator(nn.Module):
         self.to_rgbs = nn.ModuleList()
         self.noises = nn.Module()
 
-        in_channel = self.channels[4]
-
         for layer_idx in range(self.num_layers + 1):
             shape = [1, 1, self.size, self.size]
             self.noises.register_buffer(f"noise_{layer_idx}", torch.randn(*shape))
@@ -752,7 +753,7 @@ class INRGenerator(nn.Module):
                 )
             )
 
-            self.to_rgbs.append(ToRGB(self.num_channels, style_dim))
+            self.to_rgbs.append(ToRGB(self.num_channels, style_dim, upsample=False))
 
 
         self.n_latent = self.num_layers + 2
