@@ -326,6 +326,7 @@ class StyledConv(nn.Module):
         upsample=False,
         blur_kernel=[1, 3, 3, 1],
         demodulate=True,
+        modulation_type="style",
     ):
         super().__init__()
 
@@ -337,6 +338,7 @@ class StyledConv(nn.Module):
             upsample=upsample,
             blur_kernel=blur_kernel,
             demodulate=demodulate,
+            modulation_type=modulation_type
         )
 
         self.noise = NoiseInjection()
@@ -384,6 +386,7 @@ class Generator(nn.Module):
         channel_multiplier=2,
         blur_kernel=[1, 3, 3, 1],
         lr_mlp=0.01,
+        modulation_type="style"
     ):
         super().__init__()
 
@@ -416,7 +419,7 @@ class Generator(nn.Module):
 
         self.input = ConstantInput(self.channels[4])
         self.conv1 = StyledConv(
-            self.channels[4], self.channels[4], 3, style_dim, blur_kernel=blur_kernel
+            self.channels[4], self.channels[4], 3, style_dim, blur_kernel=blur_kernel, modulation_type=modulation_type
         )
         self.to_rgb1 = ToRGB(self.channels[4], style_dim, upsample=False)
 
@@ -446,12 +449,13 @@ class Generator(nn.Module):
                     style_dim,
                     upsample=True,
                     blur_kernel=blur_kernel,
+                    modulation_type=modulation_type
                 )
             )
 
             self.convs.append(
                 StyledConv(
-                    out_channel, out_channel, 3, style_dim, blur_kernel=blur_kernel
+                    out_channel, out_channel, 3, style_dim, blur_kernel=blur_kernel, modulation_type=modulation_type
                 )
             )
 
@@ -694,7 +698,8 @@ class INRGenerator(nn.Module):
         num_channels=64,
         channel_multiplier=None,
         num_fourier_features=64, 
-        num_layers=8
+        num_layers=8,
+        modulation_type="style"
     ):
         super().__init__()
 
@@ -719,7 +724,7 @@ class INRGenerator(nn.Module):
         self.input = coordinates.CoordinateInput(size=self.size, num_features=num_fourier_features, learnable=False)
         
         self.conv1 = StyledConv(
-            self.num_fourier_features, self.num_channels, 1, style_dim, blur_kernel=None, upsample=False
+            self.num_fourier_features, self.num_channels, 1, style_dim, blur_kernel=None, upsample=False, modulation_type=modulation_type
         )
         self.to_rgb1 = ToRGB(self.num_channels, style_dim, upsample=False)
 
@@ -743,12 +748,13 @@ class INRGenerator(nn.Module):
                     style_dim,
                     upsample=False,
                     blur_kernel=None,
+                    modulation_type=modulation_type
                 )
             )
 
             self.convs.append(
                 StyledConv(
-                    self.num_channels, self.num_channels, 1, style_dim, blur_kernel=None
+                    self.num_channels, self.num_channels, 1, style_dim, blur_kernel=None, modulation_type=modulation_type
                 )
             )
 
