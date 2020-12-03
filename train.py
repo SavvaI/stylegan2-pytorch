@@ -361,6 +361,9 @@ if __name__ == "__main__":
         "--generator_type", type=str, default="conv", help="type of generator to use, either conv or coord is supported"
     )
     parser.add_argument(
+        "--modulation_type", type=str, default="style", help="type of modulation applied to the generator"
+    )
+    parser.add_argument(
         "--r1", type=float, default=10, help="weight of the r1 regularization"
     )
     parser.add_argument(
