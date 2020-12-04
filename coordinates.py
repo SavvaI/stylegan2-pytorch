@@ -46,10 +46,25 @@ class CoordinateInput(nn.Module):
             self.register_buffer("fourier_coefficients", fourier_coefficients)
 
 
-    def forward(self, input):
+    def forward(self, input, grid=None):
         batch = input.shape[0]
-        
-        ff = torch.sin((self.grid_xy[:, None, :, :] * self.fourier_coefficients.T[:, :, None, None]).sum(dim=0))
+                    
+        if grid is None:
+            grid = self.grid_xy
+        if grid.ndim == 3:
+            if grid.shape[1] != grid.shape[2]:
+                raise Exception("Only square grids are supported")
+        elif grid.ndim == 2:
+            h = w = math.ceil(grid.shape[1] ** 0.5)
+            padding = torch.zeros([2, h*w - grid.shape[1]]).to(grid)
+            grid = torch.cat([grid, padding], dim=1).reshape(2, h, w)
+        elif grid.ndim == 1 or grid.ndim > 3:
+            raise Exception("Only 1D and 2D grids are supported")
+             
+        if grid.shape[0] != 2:
+            raise Exception("Only cartesian coordinates are supported")
+            
+        ff = torch.sin((grid[:, None, :, :] * self.fourier_coefficients.T[:, :, None, None]).sum(dim=0))
         out = ff.unsqueeze(0).repeat(batch, 1, 1, 1)
 
         return out
