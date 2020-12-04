@@ -463,13 +463,13 @@ if __name__ == "__main__":
         raise Exception("Only conv and coord generators are currently supported")
         
     generator = generator_model(
-        args.size, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier
+        args.size, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier, modulation_type=args.modulation_type
     ).to(device)
     discriminator = Discriminator(
         args.size, channel_multiplier=args.channel_multiplier
     ).to(device)
     g_ema = generator_model(
-        args.size, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier
+        args.size, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier, modulation_type=args.modulation_type
     ).to(device)
     g_ema.eval()
     accumulate(g_ema, generator, 0)

@@ -701,7 +701,7 @@ class INRGenerator(nn.Module):
         num_channels=128,
         channel_multiplier=None,
         num_fourier_features=128, 
-        num_layers=12
+        num_layers=12,
         modulation_type="style"
 
     ):
