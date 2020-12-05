@@ -364,6 +364,9 @@ if __name__ == "__main__":
         "--modulation_type", type=str, default="style", help="type of modulation applied to the generator"
     )
     parser.add_argument(
+        "--fourier_discr", type=int, default=0, help="number of fourier features to feed to discriminator"
+    )
+    parser.add_argument(
         "--r1", type=float, default=10, help="weight of the r1 regularization"
     )
     parser.add_argument(
@@ -466,7 +469,7 @@ if __name__ == "__main__":
         args.size, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier, modulation_type=args.modulation_type
     ).to(device)
     discriminator = Discriminator(
-        args.size, channel_multiplier=args.channel_multiplier
+        args.size, channel_multiplier=args.channel_multiplier, num_fourier_features=args.fourier_discr
     ).to(device)
     g_ema = generator_model(
         args.size, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier, modulation_type=args.modulation_type

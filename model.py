@@ -631,9 +631,9 @@ class ResBlock(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, size, channel_multiplier=2, blur_kernel=[1, 3, 3, 1]):
+    def __init__(self, size, channel_multiplier=2, blur_kernel=[1, 3, 3, 1], num_fourier_features=0):
         super().__init__()
-
+        self.num_fourier_features = num_fourier_features
         channels = {
             4: 512,
             8: 512,
@@ -646,7 +646,13 @@ class Discriminator(nn.Module):
             1024: 16 * channel_multiplier,
         }
 
-        convs = [ConvLayer(3, channels[size], 1)]
+        if num_fourier_features <= 0:
+            input_dim = 3
+        else:
+            self.coord_layer = coordinates.CoordinateInput(size=size, num_features=num_fourier_features, learnable=False)
+            input_dim = 3 + num_fourier_features
+            
+        convs = [ConvLayer(input_dim, channels[size], 1)]
 
         log_size = int(math.log(size, 2))
 
@@ -671,6 +677,10 @@ class Discriminator(nn.Module):
         )
 
     def forward(self, input):
+        if self.num_fourier_features > 0:
+            coord = self.coord_layer(input)
+            input = torch.cat([input, coord], dim=1)
+            
         out = self.convs(input)
 
         batch, channel, height, width = out.shape
