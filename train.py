@@ -250,6 +250,7 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
             path_batch_size = max(1, args.batch // args.path_batch_shrink)
             noise = mixing_noise(path_batch_size, args.latent, args.mixing, device)
             fake_img, latents = generator(noise, return_latents=True)
+            print(fake_img.requires_grad, latents.requires_grad)
 
             path_loss, mean_path_length, path_lengths = g_path_regularize(
                 fake_img, latents, mean_path_length
@@ -261,6 +262,7 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
             if args.path_batch_shrink:
                 weighted_path_loss += 0 * fake_img[0, 0, 0, 0]
 
+            print(weighted_path_loss.requires_grad)
             weighted_path_loss.backward()
 
             g_optim.step()

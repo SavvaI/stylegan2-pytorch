@@ -176,6 +176,7 @@ class ModulatedConv2d(nn.Module):
         style_dim,
         modulation_type="style",
         factorization_rank=5,
+        num_kernels=1,
         use_sigmoid=False,
         demodulate=True,
         upsample=False,
@@ -185,6 +186,7 @@ class ModulatedConv2d(nn.Module):
         super().__init__()
 
         assert modulation_type in ["style", "factorized"]
+        assert num_kernels > 0 
         self.eps = 1e-8
         self.kernel_size = kernel_size
         self.in_channel = in_channel
@@ -194,6 +196,7 @@ class ModulatedConv2d(nn.Module):
         self.factorization_rank = factorization_rank
         self.use_sigmoid = use_sigmoid
         self.modulation_type = modulation_type
+        self.num_kernels = num_kernels
 
         if upsample:
             factor = 2
@@ -216,9 +219,12 @@ class ModulatedConv2d(nn.Module):
         self.padding = kernel_size // 2
 
         self.weight = nn.Parameter(
-            torch.randn(1, out_channel, in_channel, kernel_size, kernel_size)
+            torch.randn(num_kernels, out_channel, in_channel, kernel_size, kernel_size)
         )
-
+        
+        if num_kernels > 1:
+            self.kernel_attention = EqualLinear(style_dim, num_kernels, bias_init=0)
+            
         if modulation_type == "style":
             self.modulation = EqualLinear(style_dim, in_channel, bias_init=1)
         if modulation_type == "factorized":
@@ -238,9 +244,18 @@ class ModulatedConv2d(nn.Module):
     def forward(self, input, style):
         batch, in_channel, height, width = input.shape
 
+        weight = self.weight
+        
+        if self.num_kernels > 1:
+            softmax = nn.functional.softmax(self.kernel_attention(style)/10., dim=1)
+            assert softmax.ndim == 2
+            weight = torch.unsqueeze(weight, dim=0) * softmax.view(batch, self.num_kernels, 1, 1, 1, 1)
+            weight = weight.sum(dim=1)
+            print("hello")
+            
         if self.modulation_type == "style":
             style = self.modulation(style).view(batch, 1, in_channel, 1, 1)
-            weight = self.scale * self.weight * style
+            weight = self.scale * weight * style
         if self.modulation_type == "factorized":
             ab = self.modulation(style)
             a, b = ab[:, :self.out_channel * self.factorization_rank], ab[:, self.out_channel * self.factorization_rank:]
@@ -248,7 +263,7 @@ class ModulatedConv2d(nn.Module):
             m = torch.bmm(a, b).view(batch, self.out_channel, in_channel, 1, 1)
             if self.use_sigmoid:
                 m = F.sigmoid(m)
-            weight = self.scale * self.weight * m
+            weight = self.scale * weight * m
             
 
         if self.demodulate:
