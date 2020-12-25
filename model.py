@@ -176,7 +176,7 @@ class ModulatedConv2d(nn.Module):
         style_dim,
         modulation_type="style",
         factorization_rank=5,
-        num_kernels=1,
+        num_kernels=3,
         use_sigmoid=False,
         demodulate=True,
         upsample=False,
@@ -223,7 +223,7 @@ class ModulatedConv2d(nn.Module):
         )
         
         if num_kernels > 1:
-            self.kernel_attention = EqualLinear(style_dim, num_kernels, bias_init=0)
+            self.kernel_attention = EqualLinear(style_dim, num_kernels, bias_init=0, lr_mul=1.)
             
         if modulation_type == "style":
             self.modulation = EqualLinear(style_dim, in_channel, bias_init=1)
@@ -241,17 +241,29 @@ class ModulatedConv2d(nn.Module):
             f"upsample={self.upsample}, downsample={self.downsample})"
         )
 
-    def forward(self, input, style):
+    def forward(self, input, style, epsilon_greedy=0.1, softmax=None):
         batch, in_channel, height, width = input.shape
 
         weight = self.weight
         
         if self.num_kernels > 1:
-            softmax = nn.functional.softmax(self.kernel_attention(style)/10., dim=1)
+
+            if softmax is None:
+                logits = self.kernel_attention(style)*1.
+                softmax = nn.functional.softmax(logits, dim=1)
+
+                if random.random() < epsilon_greedy:
+                    logit_noise = torch.randn(logits.shape).to(logits)
+                    softmax_noise = nn.functional.softmax(logit_noise, dim=1)
+                    alpha = random.random()/2.
+                    softmax = softmax * (1. - alpha) + softmax_noise * alpha
+#                     print("Epsilon greedy: ", epsilon_greedy)
+                
             assert softmax.ndim == 2
+            print("Epsilon greedy: ", epsilon_greedy)
+            print(softmax.std(dim=0))
             weight = torch.unsqueeze(weight, dim=0) * softmax.view(batch, self.num_kernels, 1, 1, 1, 1)
             weight = weight.sum(dim=1)
-            print("hello")
             
         if self.modulation_type == "style":
             style = self.modulation(style).view(batch, 1, in_channel, 1, 1)
@@ -361,8 +373,8 @@ class StyledConv(nn.Module):
         # self.activate = ScaledLeakyReLU(0.2)
         self.activate = FusedLeakyReLU(out_channel)
 
-    def forward(self, input, style, noise=None):
-        out = self.conv(input, style)
+    def forward(self, input, style, noise=None, epsilon_greedy=0.1, attention=None):
+        out = self.conv(input, style, epsilon_greedy=epsilon_greedy, softmax=attention)
         out = self.noise(out, noise=noise)
         # out = out + self.bias
         out = self.activate(out)
@@ -515,6 +527,8 @@ class Generator(nn.Module):
         input_is_latent=False,
         noise=None,
         randomize_noise=True,
+        epsilon_greedy=0.1,
+        attention=None,
     ):
         if not input_is_latent:
             styles = [self.style(s) for s in styles]
@@ -526,6 +540,9 @@ class Generator(nn.Module):
                 noise = [
                     getattr(self.noises, f"noise_{i}") for i in range(self.num_layers)
                 ]
+         
+        if attention is None:
+            attention = [None] * self.num_layers
 
         if truncation < 1:
             style_t = []
@@ -556,16 +573,16 @@ class Generator(nn.Module):
             latent = torch.cat([latent, latent2], 1)
 
         out = self.input(latent)
-        out = self.conv1(out, latent[:, 0], noise=noise[0])
+        out = self.conv1(out, latent[:, 0], noise=noise[0], epsilon_greedy=epsilon_greedy, attention=attention[0])
 
         skip = self.to_rgb1(out, latent[:, 1])
 
         i = 1
-        for conv1, conv2, noise1, noise2, to_rgb in zip(
-            self.convs[::2], self.convs[1::2], noise[1::2], noise[2::2], self.to_rgbs
+        for conv1, conv2, noise1, noise2, attention1, attention2, to_rgb in zip(
+            self.convs[::2], self.convs[1::2], noise[1::2], noise[2::2], attention[1::2], attention[2::2], self.to_rgbs
         ):
-            out = conv1(out, latent[:, i], noise=noise1)
-            out = conv2(out, latent[:, i + 1], noise=noise2)
+            out = conv1(out, latent[:, i], noise=noise1, epsilon_greedy=epsilon_greedy, attention=attention1)
+            out = conv2(out, latent[:, i + 1], noise=noise2, epsilon_greedy=epsilon_greedy, attention=attention2)
             skip = to_rgb(out, latent[:, i + 2], skip)
 
             i += 2
