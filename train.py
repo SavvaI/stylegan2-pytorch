@@ -364,6 +364,9 @@ if __name__ == "__main__":
         "--modulation_type", type=str, default="style", help="type of modulation applied to the generator"
     )
     parser.add_argument(
+        "--num_kernels", type=int, default=1, help="number of kernels to use for the kernel attention"
+    )
+    parser.add_argument(
         "--fourier_discr", type=int, default=0, help="number of fourier features to feed to discriminator"
     )
     parser.add_argument(
@@ -466,13 +469,15 @@ if __name__ == "__main__":
         raise Exception("Only conv and coord generators are currently supported")
         
     generator = generator_model(
-        args.size, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier, modulation_type=args.modulation_type
+        args.size, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier, modulation_type=args.modulation_type,
+        num_kernels=args.num_kernels
     ).to(device)
     discriminator = Discriminator(
         args.size, channel_multiplier=args.channel_multiplier, num_fourier_features=args.fourier_discr
     ).to(device)
     g_ema = generator_model(
-        args.size, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier, modulation_type=args.modulation_type
+        args.size, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier, modulation_type=args.modulation_type,
+        num_kernels=args.num_kernels
     ).to(device)
     g_ema.eval()
     accumulate(g_ema, generator, 0)

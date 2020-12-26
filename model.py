@@ -176,7 +176,7 @@ class ModulatedConv2d(nn.Module):
         style_dim,
         modulation_type="style",
         factorization_rank=5,
-        num_kernels=3,
+        num_kernels=1,
         use_sigmoid=False,
         demodulate=True,
         upsample=False,
@@ -260,8 +260,8 @@ class ModulatedConv2d(nn.Module):
 #                     print("Epsilon greedy: ", epsilon_greedy)
                 
             assert softmax.ndim == 2
-            print("Epsilon greedy: ", epsilon_greedy)
-            print(softmax.std(dim=0))
+#             print("Epsilon greedy: ", epsilon_greedy)
+#             print(softmax.std(dim=0).shape)
             weight = torch.unsqueeze(weight, dim=0) * softmax.view(batch, self.num_kernels, 1, 1, 1, 1)
             weight = weight.sum(dim=1)
             
@@ -354,6 +354,7 @@ class StyledConv(nn.Module):
         blur_kernel=[1, 3, 3, 1],
         demodulate=True,
         modulation_type="style",
+        num_kernels=1,
     ):
         super().__init__()
 
@@ -365,7 +366,8 @@ class StyledConv(nn.Module):
             upsample=upsample,
             blur_kernel=blur_kernel,
             demodulate=demodulate,
-            modulation_type=modulation_type
+            modulation_type=modulation_type,
+            num_kernels=num_kernels
         )
 
         self.noise = NoiseInjection()
@@ -416,7 +418,8 @@ class Generator(nn.Module):
         channel_multiplier=2,
         blur_kernel=[1, 3, 3, 1],
         lr_mlp=0.01,
-        modulation_type="style"
+        modulation_type="style",
+        num_kernels=1
     ):
         super().__init__()
 
@@ -449,7 +452,8 @@ class Generator(nn.Module):
 
         self.input = ConstantInput(self.channels[4])
         self.conv1 = StyledConv(
-            self.channels[4], self.channels[4], 3, style_dim, blur_kernel=blur_kernel, modulation_type=modulation_type
+            self.channels[4], self.channels[4], 3, style_dim, blur_kernel=blur_kernel, modulation_type=modulation_type,
+            num_kernels=num_kernels
         )
         self.to_rgb1 = ToRGB(self.channels[4], style_dim, upsample=False)
 
@@ -479,13 +483,15 @@ class Generator(nn.Module):
                     style_dim,
                     upsample=True,
                     blur_kernel=blur_kernel,
-                    modulation_type=modulation_type
+                    modulation_type=modulation_type,
+                    num_kernels=num_kernels
                 )
             )
 
             self.convs.append(
                 StyledConv(
-                    out_channel, out_channel, 3, style_dim, blur_kernel=blur_kernel, modulation_type=modulation_type
+                    out_channel, out_channel, 3, style_dim, blur_kernel=blur_kernel, modulation_type=modulation_type,
+                    num_kernels=num_kernels
                 )
             )
 
